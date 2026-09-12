@@ -96,6 +96,7 @@ apps.install           { source, expectedSha256?, expectedPublisherKey? }
 apps.uninstall         { appId }              -> {}
 apps.launch            { appId }              -> {}
 wallet.publicKey       -> { publicKey }
+wallet.generate        -> { publicKey, protected, locked }   // mints a new device identity
 wallet.status          -> { onboarded, locked, protected, name, publicKey }
 wallet.setPassphrase   { passphrase, name? }  -> {}
 wallet.lock            -> {}
@@ -107,6 +108,13 @@ wallet.signTransaction { appId, message }     -> { signature }   // requires use
 `wallet.signTransaction` MUST always raise a confirmation prompt on the device
 screen and MUST never sign without an affirmative user action. The private key
 never leaves `solweard` and is never exposed over the API.
+
+`wallet.generate` replaces the device key with a freshly generated Ed25519
+identity, written as an owner-only raw seed; the resulting wallet is
+unprotected until `wallet.setPassphrase` is called again. It is **destructive
+and irreversible** — the previous private key is discarded. A wallet that is
+`protected` and `locked` MUST be unlocked first, so a locked device cannot have
+its identity swapped without the passphrase.
 
 ### 4.3 Capabilities
 

@@ -665,6 +665,68 @@ const { publicKey } = await solwear.wallet.publicKey();
 
 ---
 
+## `wallet.generate`
+
+Replace the device identity with a freshly generated Ed25519 keypair and return
+its new public key. The old private key is discarded.
+
+**Capability:** `wallet` · **Parameters:** none
+
+Request:
+
+```json
+{ "jsonrpc": "2.0", "id": 14, "method": "wallet.generate", "params": {} }
+```
+
+Response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 14,
+  "result": { "publicKey": "9aBqM...Zs4T", "protected": false, "locked": false }
+}
+```
+
+The keypair is minted from the operating system CSPRNG inside `solweard` and
+written as an owner-only raw seed (`0600`). The private key never crosses the
+API boundary — only the new `publicKey` is returned, and a `wallet.changed`
+event is broadcast so other views can refresh.
+
+> **This is destructive and irreversible.** Regenerating discards the previous
+> private key. Any funds or on-chain state tied to the old address are no longer
+> controllable by the device. Treat a call to `wallet.generate` the way you
+> would treat wiping the device.
+
+A **protected** wallet must be **unlocked** before it can be regenerated — a
+locked wallet returns an error, so an attacker with a locked device cannot swap
+its identity without the passphrase:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 14,
+  "error": { "code": -32002, "message": "unlock the wallet before generating a new one" }
+}
+```
+
+The freshly generated wallet is **unprotected** (`protected: false`). If the old
+wallet had a passphrase, that passphrase does not carry over — call
+`wallet.setPassphrase` again to protect the new identity.
+
+```ts
+const { publicKey } = await solwear.wallet.generate();
+await solwear.wallet.setPassphrase("a new strong passphrase", "My SolWear");
+```
+
+> **Security note.** Unlike `wallet.signTransaction`, `wallet.generate` does not
+> currently raise an on-device confirmation prompt, so any app you grant the
+> `wallet` capability can replace the identity of an unlocked wallet. Grant
+> `wallet` only to apps you trust, and prefer to drive regeneration from the
+> shell's own settings UI rather than from third-party apps.
+
+---
+
 ## `wallet.signTransaction`
 
 Sign a transaction with the device key, after the user confirms on the device
@@ -781,6 +843,7 @@ with no `id`, which therefore expects no response. The SDK surfaces them through
 | `visibility` | `{ visible }` | When the app moves to or from the foreground. |
 | `button` | `{ button, action }` | On a hardware button press or release. |
 | `gesture` | `{ gesture, direction }` | On a recognised touch gesture. |
+| `wallet.changed` | `{ publicKey }` | When the device identity changes, e.g. after `wallet.generate`. |
 
 ```json
 {
