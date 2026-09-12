@@ -252,6 +252,15 @@ pub async fn dispatch(
         }
 
         "wallet.publicKey" => Ok(json!({ "publicKey": state.wallet.public_key() })),
+        "wallet.generate" => {
+            let public_key = state.wallet.generate()?;
+            state.push_event("wallet.changed", json!({ "publicKey": public_key }));
+            Ok(json!({
+                "publicKey": public_key,
+                "protected": state.wallet.is_protected(),
+                "locked": state.wallet.is_locked(),
+            }))
+        }
         "wallet.status" => Ok(json!({
             "onboarded": true,
             "locked": state.wallet.is_locked(),

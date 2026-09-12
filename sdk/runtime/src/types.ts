@@ -72,6 +72,12 @@ export interface WalletPublicKey {
   publicKey: string;
 }
 
+export interface WalletGenerated {
+  publicKey: string;
+  protected: boolean;
+  locked: boolean;
+}
+
 export interface WalletSignature {
   signature: string;
 }

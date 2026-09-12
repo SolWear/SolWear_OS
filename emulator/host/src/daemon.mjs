@@ -279,6 +279,20 @@ export class MockDaemon {
 
       case "wallet.publicKey":
         return { publicKey: this.walletAddress };
+      case "wallet.generate": {
+        // Mirror the daemon: a protected wallet must be unlocked first, so a
+        // locked device cannot have its identity silently swapped.
+        if (this.walletProtected && this.walletLocked) throw MockDaemon.rpcError(ERR_USER_REJECTED, "unlock the wallet before generating a new one");
+        const fresh = generateKeyPairSync("ed25519");
+        this.walletPrivateKey = fresh.privateKey;
+        this.walletPublicKeyRaw = fresh.publicKey.export({ format: "der", type: "spki" }).subarray(-32);
+        this.walletAddress = base58(this.walletPublicKeyRaw);
+        this.walletLocked = false;
+        this.walletProtected = false;
+        this.walletPassphraseDigest = null;
+        this.broadcast?.("wallet.changed", { publicKey: this.walletAddress });
+        return { publicKey: this.walletAddress, protected: false, locked: false };
+      }
       case "wallet.status":
         return { onboarded: true, locked: this.walletLocked, protected: this.walletProtected, name: this.walletName, publicKey: this.walletAddress };
       case "wallet.setPassphrase":

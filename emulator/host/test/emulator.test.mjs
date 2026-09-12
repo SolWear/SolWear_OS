@@ -32,6 +32,32 @@ test("wallet signs only after an affirmative confirmation", async () => {
   assert.match(signed.result.signature, /^[1-9A-HJ-NP-Za-km-z]+$/);
 });
 
+test("wallet.generate mints a new identity and refuses while locked", async () => {
+  const walletApp = { ...app, capabilities: ["wallet"] };
+  const daemon = new MockDaemon({ profile, apps: [walletApp] });
+
+  const before = await daemon.handle({ jsonrpc: "2.0", id: 1, method: "wallet.publicKey" }, walletApp.id);
+  const generated = await daemon.handle({ jsonrpc: "2.0", id: 2, method: "wallet.generate" }, walletApp.id);
+  assert.match(generated.result.publicKey, /^[1-9A-HJ-NP-Za-km-z]+$/);
+  assert.notEqual(generated.result.publicKey, before.result.publicKey);
+  assert.equal(generated.result.protected, false);
+  const after = await daemon.handle({ jsonrpc: "2.0", id: 3, method: "wallet.publicKey" }, walletApp.id);
+  assert.equal(after.result.publicKey, generated.result.publicKey);
+
+  // Protect + lock, then generation must be refused until unlocked.
+  await daemon.handle({ jsonrpc: "2.0", id: 4, method: "wallet.setPassphrase", params: { passphrase: "correct horse battery staple" } }, walletApp.id);
+  await daemon.handle({ jsonrpc: "2.0", id: 5, method: "wallet.lock" }, walletApp.id);
+  const refused = await daemon.handle({ jsonrpc: "2.0", id: 6, method: "wallet.generate" }, walletApp.id);
+  assert.equal(refused.error.code, -32002);
+  const held = await daemon.handle({ jsonrpc: "2.0", id: 7, method: "wallet.publicKey" }, walletApp.id);
+  assert.equal(held.result.publicKey, generated.result.publicKey);
+
+  await daemon.handle({ jsonrpc: "2.0", id: 8, method: "wallet.unlock", params: { passphrase: "correct horse battery staple" } }, walletApp.id);
+  const regenerated = await daemon.handle({ jsonrpc: "2.0", id: 9, method: "wallet.generate" }, walletApp.id);
+  assert.notEqual(regenerated.result.publicKey, generated.result.publicKey);
+  assert.equal(regenerated.result.protected, false);
+});
+
 test("NFC mock exposes the legacy wallet NDEF contract", async () => {
   const nfcApp = { ...app, capabilities: ["nfc"] };
   const daemon = new MockDaemon({ profile, apps: [nfcApp] });

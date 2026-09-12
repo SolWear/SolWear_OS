@@ -676,6 +676,81 @@ async fn wallet_passphrase_encrypts_at_rest_and_survives_restart() {
 }
 
 #[tokio::test]
+async fn wallet_generate_replaces_the_identity_and_resets_protection() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state = test_state(dir.path());
+    let original = state.wallet.public_key();
+
+    let generated = call(&state, &Caller::Shell, "wallet.generate", json!({}))
+        .await
+        .expect("generate a fresh wallet");
+    let new_key = generated["publicKey"].as_str().expect("base58 key");
+    assert_eq!(bs58::decode(new_key).into_vec().unwrap().len(), 32);
+    assert_ne!(new_key, original, "generation must mint a new identity");
+    assert_eq!(generated["protected"], json!(false));
+    assert_eq!(generated["locked"], json!(false));
+    assert_eq!(state.wallet.public_key(), new_key);
+
+    // The new identity is a raw owner-only seed that survives a restart.
+    drop(state);
+    let reopened = test_state(dir.path());
+    assert_eq!(reopened.wallet.public_key(), new_key);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(dir.path().join("wallet.key"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "the regenerated key stays owner-only");
+    }
+}
+
+#[tokio::test]
+async fn wallet_generate_refuses_while_protected_and_locked() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state = test_state(dir.path());
+    let protected_key = state.wallet.public_key();
+
+    call(
+        &state,
+        &Caller::Shell,
+        "wallet.setPassphrase",
+        json!({ "passphrase": "correct horse battery staple", "name": "Primary" }),
+    )
+    .await
+    .expect("protect wallet");
+    call(&state, &Caller::Shell, "wallet.lock", json!({}))
+        .await
+        .expect("lock wallet");
+
+    let refused = call(&state, &Caller::Shell, "wallet.generate", json!({}))
+        .await
+        .expect_err("a locked, protected wallet cannot be regenerated");
+    assert_eq!(refused.code, USER_REJECTED);
+    assert_eq!(
+        state.wallet.public_key(),
+        protected_key,
+        "the identity is untouched after a refusal"
+    );
+
+    // Unlocking first permits regeneration.
+    call(
+        &state,
+        &Caller::Shell,
+        "wallet.unlock",
+        json!({ "passphrase": "correct horse battery staple" }),
+    )
+    .await
+    .expect("unlock wallet");
+    let generated = call(&state, &Caller::Shell, "wallet.generate", json!({}))
+        .await
+        .expect("generate after unlock");
+    assert_ne!(generated["publicKey"].as_str().unwrap(), protected_key);
+    assert_eq!(generated["protected"], json!(false));
+}
+
+#[tokio::test]
 async fn signing_without_a_shell_is_refused() {
     let dir = tempfile::tempdir().expect("temp dir");
     let state = test_state(dir.path());

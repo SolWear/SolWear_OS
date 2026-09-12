@@ -10,6 +10,7 @@ import type {
   SystemInfo,
   SystemStats,
   SystemTime,
+  WalletGenerated,
   WalletPublicKey,
   WalletStatus,
   WalletActivity,
@@ -143,6 +144,15 @@ export class WalletClient {
 
   status(): Promise<WalletStatus> {
     return this.bridge.call<WalletStatus>("wallet.status");
+  }
+
+  /**
+   * Replace the device identity with a freshly generated keypair and return its
+   * base58 public key. The new wallet is unprotected; a protected wallet must be
+   * unlocked first or the daemon rejects the call.
+   */
+  async generate(): Promise<WalletGenerated> {
+    return this.bridge.call<WalletGenerated>("wallet.generate");
   }
 
   async setPassphrase(passphrase: string, name = "SolWear"): Promise<void> {

@@ -36,7 +36,7 @@ struct EncryptedWallet {
 pub struct Wallet {
     signing_key: Mutex<Option<SigningKey>>,
     encrypted: Mutex<Option<EncryptedWallet>>,
-    public_key: String,
+    public_key: Mutex<String>,
     path: PathBuf,
 }
 
@@ -44,7 +44,7 @@ impl std::fmt::Debug for Wallet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Wallet")
             .field("path", &self.path)
-            .field("publicKey", &self.public_key)
+            .field("publicKey", &self.public_key())
             .field("locked", &self.is_locked())
             .field("protected", &self.is_protected())
             .finish_non_exhaustive()
@@ -71,7 +71,7 @@ impl Wallet {
                 return Ok(Wallet {
                     signing_key: Mutex::new(Some(key)),
                     encrypted: Mutex::new(None),
-                    public_key,
+                    public_key: Mutex::new(public_key),
                     path: path.to_path_buf(),
                 });
             }
@@ -91,7 +91,7 @@ impl Wallet {
             }
             return Ok(Wallet {
                 signing_key: Mutex::new(None),
-                public_key: document.public_key.clone(),
+                public_key: Mutex::new(document.public_key.clone()),
                 encrypted: Mutex::new(Some(document)),
                 path: path.to_path_buf(),
             });
@@ -103,13 +103,36 @@ impl Wallet {
         Ok(Wallet {
             signing_key: Mutex::new(Some(signing_key)),
             encrypted: Mutex::new(None),
-            public_key,
+            public_key: Mutex::new(public_key),
             path: path.to_path_buf(),
         })
     }
 
     pub fn public_key(&self) -> String {
-        self.public_key.clone()
+        self.public_key.lock().expect("wallet public key").clone()
+    }
+
+    /// Replace the device identity with a freshly generated Ed25519 keypair,
+    /// written as an owner-only raw seed. The new wallet is unprotected, matching
+    /// a first-boot wallet, so `wallet.setPassphrase` can protect it afterward.
+    ///
+    /// A protected wallet must be unlocked first: regenerating requires proving
+    /// ownership of the current key, so a stolen-but-locked device cannot have its
+    /// identity silently swapped.
+    pub fn generate(&self) -> Result<String, RpcError> {
+        if self.is_protected() && self.is_locked() {
+            return Err(RpcError::new(
+                USER_REJECTED,
+                "unlock the wallet before generating a new one",
+            ));
+        }
+        let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
+        let public_key = bs58::encode(signing_key.verifying_key().to_bytes()).into_string();
+        replace_private(&self.path, &signing_key.to_bytes())?;
+        *self.public_key.lock().expect("wallet public key") = public_key.clone();
+        *self.signing_key.lock().expect("wallet key") = Some(signing_key);
+        *self.encrypted.lock().expect("wallet document") = None;
+        Ok(public_key)
     }
     pub fn is_locked(&self) -> bool {
         self.signing_key.lock().expect("wallet key").is_none()
@@ -159,7 +182,7 @@ impl Wallet {
             } else {
                 name.trim().chars().take(32).collect()
             },
-            public_key: self.public_key.clone(),
+            public_key: self.public_key(),
             salt: b64(&salt),
             nonce: b64(&nonce),
             ciphertext: b64(&ciphertext),
@@ -220,7 +243,7 @@ impl Wallet {
         })?;
         let signing_key = SigningKey::from_bytes(&seed_array);
         seed.zeroize();
-        if bs58::encode(signing_key.verifying_key().to_bytes()).into_string() != self.public_key {
+        if bs58::encode(signing_key.verifying_key().to_bytes()).into_string() != self.public_key() {
             return Err(RpcError::new(
                 INTERNAL_ERROR,
                 "decrypted wallet does not match its public key",
