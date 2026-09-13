@@ -393,13 +393,19 @@ export class Shell {
         el(
           "div",
           { class: "watchface-meta" },
-          this.meter("Battery", `${Math.round(this.power.percent)}%`, this.power.percent),
+          this.meter(
+            "Battery",
+            `${Math.round(this.power.percent)}%`,
+            this.power.percent,
+            this.power.charging,
+          ),
           this.meter(
             "Network",
             this.network.connected ? (this.network.ssid ?? "online") : "offline",
             // Only draw a bar when the HAL actually reports a strength.
             // Painting a full bar for "connected" would be an invented reading.
             this.network.signal ?? undefined,
+            this.network.connected,
           ),
         ),
         unread > 0
@@ -413,10 +419,10 @@ export class Shell {
     );
   }
 
-  private meter(label: string, value: string, percent?: number): HTMLElement {
+  private meter(label: string, value: string, percent?: number, live = false): HTMLElement {
     const meter = el(
       "div",
-      { class: "meter" },
+      { class: `meter ${live ? "meter-live" : ""}` },
       el("div", { class: "meter-label", text: label }),
       el("div", { class: "meter-value", text: value }),
     );
@@ -637,9 +643,28 @@ export class Shell {
     this.overlay.append(
       el(
         "div",
-        { class: "confirm" },
-        el("h2", { class: "confirm-title", text: "Sign transaction?" }),
-        el("p", { class: "confirm-app", text: request.appId }),
+        {
+          class: "confirm",
+          role: "alertdialog",
+          "aria-modal": "true",
+          "aria-labelledby": "confirm-title",
+          "aria-describedby": "confirm-app",
+        },
+        el(
+          "div",
+          { class: "confirm-kicker" },
+          el("span", { class: "confirm-signal", "aria-hidden": "true" }),
+          "Secure signer",
+        ),
+        el("h2", { class: "confirm-title", id: "confirm-title", text: "Verify signature" }),
+        el("p", {
+          class: "confirm-app mono",
+          id: "confirm-app",
+          text: `Requested by ${request.appId}`,
+        }),
+        summary.label
+          ? el("p", { class: "confirm-label", text: summary.label })
+          : null,
         el(
           "dl",
           { class: "confirm-detail" },
@@ -654,7 +679,11 @@ export class Shell {
           "div",
           { class: "confirm-actions" },
           el("button", { class: "button ghost", text: "Reject", onclick: () => answer(false) }),
-          el("button", { class: "button primary", text: "Approve", onclick: () => answer(true) }),
+          el("button", {
+            class: "button primary",
+            text: "Confirm",
+            onclick: () => answer(true),
+          }),
         ),
       ),
     );
