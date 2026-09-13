@@ -40,6 +40,7 @@ export class Shell {
   private online = false;
   private confirming: ConfirmRequest | null = null;
   private pointerStart: { x: number; y: number; t: number } | null = null;
+  private lastTap: { x: number; y: number; t: number } | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -178,8 +179,9 @@ export class Shell {
 
   /**
    * Swipes drive the whole shell: up for the launcher, down for the tray,
-   * right to go back. Arrow keys do the same thing so the emulator and a
-   * desktop browser are usable without a touchscreen.
+   * right to go back. A double-tap on the home screen is a second way into the
+   * launcher, for the same reasons a swipe up is. Arrow keys do the same thing
+   * so the emulator and a desktop browser are usable without a touchscreen.
    */
   private installGestures(): void {
     this.root.addEventListener(
@@ -240,7 +242,27 @@ export class Shell {
     const dx = x - start.x;
     const dy = y - start.y;
     const threshold = 0.15;
-    if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) return;
+    if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) {
+      // Barely moved: this is a tap, not a swipe. Two quick taps in the same
+      // spot are a double-tap. The same normalised stream feeds both the shell
+      // chrome and the sandboxed frame, so a double-tap works on the built-in
+      // watchface and on an installed one alike.
+      const previous = this.lastTap;
+      this.lastTap = t - start.t <= 400 ? { x, y, t } : null;
+      if (
+        previous &&
+        this.lastTap &&
+        t - previous.t <= 300 &&
+        Math.abs(x - previous.x) < threshold &&
+        Math.abs(y - previous.y) < threshold
+      ) {
+        this.lastTap = null;
+        this.onDoubleTap();
+      }
+      return;
+    }
+    // A real swipe cancels any pending double-tap.
+    this.lastTap = null;
 
     if (Math.abs(dy) > Math.abs(dx)) {
       this.onGesture(dy < 0 ? "up" : "down");
@@ -271,6 +293,18 @@ export class Shell {
         if (direction === "right" || direction === "down") this.go("watch");
         break;
     }
+  }
+
+  /**
+   * A double-tap opens the launcher, exactly like a swipe up. It is a
+   * home-screen shortcut only: inside an app the gesture belongs to the app,
+   * and a tap on an interactive control (the notification pill) has already
+   * moved us off the watchface by the time the second tap lands, so the
+   * `view === "watch"` guard keeps single-tap behaviour intact.
+   */
+  private onDoubleTap(): void {
+    if (this.confirming) return;
+    if (this.view === "watch") this.go("launcher");
   }
 
   // --- rendering ---------------------------------------------------------
@@ -374,7 +408,7 @@ export class Shell {
               text: `${unread} notification${unread === 1 ? "" : "s"}`,
               onclick: () => this.go("tray"),
             })
-          : el("div", { class: "hint", text: "swipe up for apps" }),
+          : el("div", { class: "hint", text: "double-tap or swipe up for apps" }),
       ),
     );
   }

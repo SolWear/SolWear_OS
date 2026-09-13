@@ -1,10 +1,17 @@
 /*
  * SolWear shell styling.
  *
- * Two rules govern everything here: no pixel constants, and no expensive
+ * The palette is the solwear.tech brand: a near-black ground, white for
+ * primary text, muted grey for everything secondary, and SolWear red as the
+ * single accent. Red is used sparingly and always means "live" — the seconds
+ * on the clock, a charging battery, the connection heartbeat — so it reads as
+ * a signal rather than decoration.
+ *
+ * Two rules still govern everything here: no pixel constants, and no expensive
  * paint. Sizes are multiples of --u (one percent of the smaller screen
- * dimension) set by layout.ts, and there are no blurs or large shadows, which
- * are the usual reason a Pi 4 drops frames.
+ * dimension) set by layout.ts. The one animated shadow, the red pulse on the
+ * connection dot, is confined to a single ~2u element so it stays the brand's
+ * signature without becoming the reason a Pi 4 drops frames.
  */
 
 :root {
@@ -12,16 +19,31 @@
   --inset: 40px;
   --corner: 50%;
 
-  --ink: #f4f6f8;
-  --ink-dim: #9aa4b0;
-  --ink-faint: #626c78;
-  --bg: #05070a;
-  --panel: #11151b;
-  --panel-high: #1a2029;
-  --line: #232a34;
-  --accent: #4dd6a1;
-  --accent-ink: #04120c;
-  --warn: #ff6b5e;
+  --ink: #ffffff;
+  --ink-dim: #999999;
+  --ink-faint: #666666;
+  --bg: #0d0d0d;
+  --panel: #161616;
+  --panel-high: #202020;
+  --line: rgba(255, 255, 255, 0.1);
+  --accent: #e0000f;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(224, 0, 15, 0.16);
+  --warn: #e0000f;
+}
+
+/*
+ * The brand's signature: a red glow that swells and fades, the visible pulse
+ * of a live device. Reused wherever the shell wants to say "connected".
+ */
+@keyframes pulse-red {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(224, 0, 15, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 calc(var(--u) * 2) rgba(224, 0, 15, 0);
+  }
 }
 
 * {
