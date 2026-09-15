@@ -1,6 +1,8 @@
 //! JSON-RPC 2.0 request handling: parsing, capability enforcement, dispatch.
 
-use crate::error::{RpcError, RpcResult, CAPABILITY_DENIED, INVALID_REQUEST, PARSE_ERROR};
+use crate::error::{
+    RpcError, RpcResult, CAPABILITY_DENIED, INVALID_REQUEST, PARSE_ERROR, USER_REJECTED,
+};
 use crate::hal::KNOWN_SENSORS;
 use crate::state::{AppState, Caller, SHELL_APP_ID};
 use base64::Engine;
@@ -252,15 +254,7 @@ pub async fn dispatch(
         }
 
         "wallet.publicKey" => Ok(json!({ "publicKey": state.wallet.public_key() })),
-        "wallet.generate" => {
-            let public_key = state.wallet.generate()?;
-            state.push_event("wallet.changed", json!({ "publicKey": public_key }));
-            Ok(json!({
-                "publicKey": public_key,
-                "protected": state.wallet.is_protected(),
-                "locked": state.wallet.is_locked(),
-            }))
-        }
+        "wallet.generate" => generate_wallet(state, caller).await,
         "wallet.status" => Ok(json!({
             "onboarded": true,
             "locked": state.wallet.is_locked(),
@@ -430,6 +424,40 @@ async fn sign_transaction(
     );
     tracing::info!(app = %requested_app, bytes = bytes.len(), "transaction signed after user confirmation");
     Ok(json!({ "signature": signature }))
+}
+
+async fn generate_wallet(state: &Arc<AppState>, caller: &Caller) -> RpcResult<Value> {
+    // Preserve the existing passphrase guard before raising a prompt: a
+    // stolen-but-locked device must not offer any path to replace its key.
+    if state.wallet.is_protected() && state.wallet.is_locked() {
+        return Err(RpcError::new(
+            USER_REJECTED,
+            "unlock the wallet before generating a new one",
+        ));
+    }
+
+    let current_public_key = state.wallet.public_key();
+    let summary = json!({
+        "action": "replaceWalletIdentity",
+        "appId": caller.app_id(),
+        "label": "Replace wallet identity",
+        "publicKey": current_public_key,
+    });
+
+    // Blocks until the wearer approves on the device. The key is not touched
+    // before an affirmative response.
+    state
+        .request_confirmation(caller.app_id(), summary)
+        .await?;
+
+    let public_key = state.wallet.generate()?;
+    state.push_event("wallet.changed", json!({ "publicKey": public_key }));
+    tracing::info!(app = %caller.app_id(), previous_public_key = %current_public_key, "wallet identity replaced after user confirmation");
+    Ok(json!({
+        "publicKey": public_key,
+        "protected": state.wallet.is_protected(),
+        "locked": state.wallet.is_locked(),
+    }))
 }
 
 fn decode_message(message: &str, encoding: &str) -> RpcResult<Vec<u8>> {

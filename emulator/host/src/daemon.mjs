@@ -75,7 +75,7 @@ export class MockDaemon {
 
     /**
      * Set by the server to the function that asks the wearer to confirm.
-     * The daemon owns the decision to sign; the shell only renders the prompt.
+     * The daemon owns the decision; the shell only renders the prompt.
      * @type {null | ((request: object) => Promise<boolean>)}
      */
     this.confirm = null;
@@ -283,6 +283,20 @@ export class MockDaemon {
         // Mirror the daemon: a protected wallet must be unlocked first, so a
         // locked device cannot have its identity silently swapped.
         if (this.walletProtected && this.walletLocked) throw MockDaemon.rpcError(ERR_USER_REJECTED, "unlock the wallet before generating a new one");
+        const approved = this.confirm
+          ? await this.confirm({
+              appId: callerId,
+              summary: {
+                action: "replaceWalletIdentity",
+                appId: callerId,
+                label: "Replace wallet identity",
+                publicKey: this.walletAddress,
+              },
+            })
+          : false;
+        if (!approved) {
+          throw MockDaemon.rpcError(ERR_USER_REJECTED, "the wearer declined the wallet replacement request");
+        }
         const fresh = generateKeyPairSync("ed25519");
         this.walletPrivateKey = fresh.privateKey;
         this.walletPublicKeyRaw = fresh.publicKey.export({ format: "der", type: "spki" }).subarray(-32);

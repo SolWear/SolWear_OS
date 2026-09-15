@@ -621,7 +621,7 @@ export class Shell {
     );
   }
 
-  /** The wallet confirmation prompt: the only path to a signature. */
+  /** The wallet confirmation prompt for signing and destructive key replacement. */
   private renderOverlay(): void {
     clear(this.overlay);
     const request = this.confirming;
@@ -632,6 +632,7 @@ export class Shell {
     this.overlay.hidden = false;
 
     const summary = request.summary ?? ({} as ConfirmRequest["summary"]);
+    const replacingIdentity = summary.action === "replaceWalletIdentity";
     const answer = (approved: boolean) => {
       this.confirming = null;
       this.renderOverlay();
@@ -656,7 +657,11 @@ export class Shell {
           el("span", { class: "confirm-signal", "aria-hidden": "true" }),
           "Secure signer",
         ),
-        el("h2", { class: "confirm-title", id: "confirm-title", text: "Verify signature" }),
+        el("h2", {
+          class: "confirm-title",
+          id: "confirm-title",
+          text: replacingIdentity ? "Replace wallet identity?" : "Verify signature",
+        }),
         el("p", {
           class: "confirm-app mono",
           id: "confirm-app",
@@ -665,16 +670,25 @@ export class Shell {
         summary.label
           ? el("p", { class: "confirm-label", text: summary.label })
           : null,
-        el(
-          "dl",
-          { class: "confirm-detail" },
-          el("dt", { text: "Account" }),
-          el("dd", { class: "mono", text: elide(summary.publicKey ?? "", 6, 6) }),
-          el("dt", { text: "Payload" }),
-          el("dd", { class: "mono", text: `${summary.byteLength ?? 0} bytes` }),
-          el("dt", { text: "Digest" }),
-          el("dd", { class: "mono", text: elide(summary.digest ?? "", 8, 8) }),
-        ),
+        replacingIdentity
+          ? el(
+              "dl",
+              { class: "confirm-detail" },
+              el("dt", { text: "Current account" }),
+              el("dd", { class: "mono", text: elide(summary.publicKey ?? "", 6, 6) }),
+              el("dt", { text: "Action" }),
+              el("dd", { text: "Permanently discard this key and create a new identity" }),
+            )
+          : el(
+              "dl",
+              { class: "confirm-detail" },
+              el("dt", { text: "Account" }),
+              el("dd", { class: "mono", text: elide(summary.publicKey ?? "", 6, 6) }),
+              el("dt", { text: "Payload" }),
+              el("dd", { class: "mono", text: `${summary.byteLength ?? 0} bytes` }),
+              el("dt", { text: "Digest" }),
+              el("dd", { class: "mono", text: elide(summary.digest ?? "", 8, 8) }),
+            ),
         el(
           "div",
           { class: "confirm-actions" },

@@ -680,6 +680,25 @@ async fn wallet_generate_replaces_the_identity_and_resets_protection() {
     let dir = tempfile::tempdir().expect("temp dir");
     let state = test_state(dir.path());
     let original = state.wallet.public_key();
+    let mut events = state.register_shell();
+    let approving = std::sync::Arc::clone(&state);
+    let expected_key = original.clone();
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            let parsed: Value = serde_json::from_str(&event).unwrap();
+            if parsed["method"] == "wallet.confirmRequest" {
+                assert_eq!(parsed["params"]["appId"], "tech.solwear.shell");
+                assert_eq!(
+                    parsed["params"]["summary"]["action"],
+                    "replaceWalletIdentity"
+                );
+                assert_eq!(parsed["params"]["summary"]["publicKey"], expected_key);
+                let request_id = parsed["params"]["requestId"].as_str().unwrap();
+                approving.resolve_confirmation(request_id, true);
+                return;
+            }
+        }
+    });
 
     let generated = call(&state, &Caller::Shell, "wallet.generate", json!({}))
         .await
@@ -707,6 +726,44 @@ async fn wallet_generate_replaces_the_identity_and_resets_protection() {
 }
 
 #[tokio::test]
+async fn wallet_generate_without_a_shell_is_refused_without_changing_the_key() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state = test_state(dir.path());
+    let original = state.wallet.public_key();
+
+    let error = call(&state, &Caller::Shell, "wallet.generate", json!({}))
+        .await
+        .expect_err("no shell means no prompt and no identity replacement");
+    assert_eq!(error.code, SHELL_UNAVAILABLE);
+    assert_eq!(state.wallet.public_key(), original);
+}
+
+#[tokio::test]
+async fn wallet_generate_requires_an_affirmative_confirmation() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let state = test_state(dir.path());
+    let original = state.wallet.public_key();
+    let mut events = state.register_shell();
+    let refusing = std::sync::Arc::clone(&state);
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            let parsed: Value = serde_json::from_str(&event).unwrap();
+            if parsed["method"] == "wallet.confirmRequest" {
+                let request_id = parsed["params"]["requestId"].as_str().unwrap();
+                refusing.resolve_confirmation(request_id, false);
+                return;
+            }
+        }
+    });
+
+    let error = call(&state, &Caller::Shell, "wallet.generate", json!({}))
+        .await
+        .expect_err("declining identity replacement must preserve the wallet");
+    assert_eq!(error.code, USER_REJECTED);
+    assert_eq!(state.wallet.public_key(), original);
+}
+
+#[tokio::test]
 async fn wallet_generate_refuses_while_protected_and_locked() {
     let dir = tempfile::tempdir().expect("temp dir");
     let state = test_state(dir.path());
@@ -723,6 +780,7 @@ async fn wallet_generate_refuses_while_protected_and_locked() {
     call(&state, &Caller::Shell, "wallet.lock", json!({}))
         .await
         .expect("lock wallet");
+    let mut events = state.register_shell();
 
     let refused = call(&state, &Caller::Shell, "wallet.generate", json!({}))
         .await
@@ -732,6 +790,10 @@ async fn wallet_generate_refuses_while_protected_and_locked() {
         state.wallet.public_key(),
         protected_key,
         "the identity is untouched after a refusal"
+    );
+    assert!(
+        matches!(events.try_recv(), Err(tokio::sync::mpsc::error::TryRecvError::Empty)),
+        "the locked-wallet guard must run before a confirmation is requested"
     );
 
     // Unlocking first permits regeneration.
@@ -743,6 +805,17 @@ async fn wallet_generate_refuses_while_protected_and_locked() {
     )
     .await
     .expect("unlock wallet");
+    let approving = std::sync::Arc::clone(&state);
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            let parsed: Value = serde_json::from_str(&event).unwrap();
+            if parsed["method"] == "wallet.confirmRequest" {
+                let request_id = parsed["params"]["requestId"].as_str().unwrap();
+                approving.resolve_confirmation(request_id, true);
+                return;
+            }
+        }
+    });
     let generated = call(&state, &Caller::Shell, "wallet.generate", json!({}))
         .await
         .expect("generate after unlock");

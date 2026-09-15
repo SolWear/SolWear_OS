@@ -62,10 +62,11 @@ export interface ConfirmRequest {
   requestId: string;
   appId: string;
   summary: {
+    action?: "signTransaction" | "replaceWalletIdentity";
     appId: string;
-    byteLength: number;
-    encoding: string;
-    digest: string;
+    byteLength?: number;
+    encoding?: string;
+    digest?: string;
     publicKey: string;
     label?: string | null;
   };

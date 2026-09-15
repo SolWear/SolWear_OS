@@ -158,11 +158,11 @@ export class EmulatorServer {
   }
 
   /**
-   * Ask the shell to show the signing prompt.
+   * Ask the shell to show a wallet confirmation prompt.
    *
    * The daemon sends a JSON-RPC request to the shell's own socket and waits for
    * the answer, which is how the device behaves: the decision belongs to the
-   * daemon, the pixels belong to the shell. No prompt, no signature.
+   * daemon, the pixels belong to the shell. No prompt, no sensitive action.
    */
   askForConfirmation(request) {
     const shellSocket = [...this.sockets].find((socket) =>

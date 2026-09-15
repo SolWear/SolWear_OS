@@ -17,7 +17,11 @@ function connect() {
   socket.addEventListener("message", ({ data }) => {
     const message = JSON.parse(data);
     if (message.method === "wallet.confirmRequest") {
-      const approved = confirm(`Allow ${message.params.appId} to sign ${message.params.summary.byteLength} bytes?`);
+      const summary = message.params.summary ?? {};
+      const prompt = summary.action === "replaceWalletIdentity"
+        ? `Allow ${message.params.appId} to permanently replace wallet ${summary.publicKey} with a new identity?`
+        : `Allow ${message.params.appId} to sign ${summary.byteLength} bytes?`;
+      const approved = confirm(prompt);
       void call("shell.confirmResponse", { requestId: message.params.requestId, approved });
       return;
     }

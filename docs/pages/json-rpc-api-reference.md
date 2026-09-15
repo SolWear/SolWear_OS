@@ -668,7 +668,8 @@ const { publicKey } = await solwear.wallet.publicKey();
 ## `wallet.generate`
 
 Replace the device identity with a freshly generated Ed25519 keypair and return
-its new public key. The old private key is discarded.
+its new public key, after the wearer confirms on the device. The old private
+key is discarded.
 
 **Capability:** `wallet` · **Parameters:** none
 
@@ -693,14 +694,22 @@ written as an owner-only raw seed (`0600`). The private key never crosses the
 API boundary — only the new `publicKey` is returned, and a `wallet.changed`
 event is broadcast so other views can refresh.
 
+This call **always** raises an on-device confirmation describing the wallet
+identity replacement and showing the current public key. Generation begins
+only after an affirmative response. If no shell is connected, the call returns
+`SHELL_UNAVAILABLE` (`-32003`); if the wearer declines or the prompt times out,
+it returns `USER_REJECTED` (`-32002`). In every refusal case the existing key is
+left untouched.
+
 > **This is destructive and irreversible.** Regenerating discards the previous
 > private key. Any funds or on-chain state tied to the old address are no longer
 > controllable by the device. Treat a call to `wallet.generate` the way you
 > would treat wiping the device.
 
-A **protected** wallet must be **unlocked** before it can be regenerated — a
-locked wallet returns an error, so an attacker with a locked device cannot swap
-its identity without the passphrase:
+A **protected** wallet must be **unlocked** before it can be regenerated. This
+guard runs before the confirmation prompt: a locked wallet returns an error
+without prompting, so an attacker with a locked device cannot swap its identity
+without the passphrase:
 
 ```json
 {
@@ -718,12 +727,6 @@ wallet had a passphrase, that passphrase does not carry over — call
 const { publicKey } = await solwear.wallet.generate();
 await solwear.wallet.setPassphrase("a new strong passphrase", "My SolWear");
 ```
-
-> **Security note.** Unlike `wallet.signTransaction`, `wallet.generate` does not
-> currently raise an on-device confirmation prompt, so any app you grant the
-> `wallet` capability can replace the identity of an unlocked wallet. Grant
-> `wallet` only to apps you trust, and prefer to drive regeneration from the
-> shell's own settings UI rather than from third-party apps.
 
 ---
 

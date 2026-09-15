@@ -32,30 +32,51 @@ test("wallet signs only after an affirmative confirmation", async () => {
   assert.match(signed.result.signature, /^[1-9A-HJ-NP-Za-km-z]+$/);
 });
 
-test("wallet.generate mints a new identity and refuses while locked", async () => {
+test("wallet.generate requires confirmation and only approval replaces the identity", async () => {
   const walletApp = { ...app, capabilities: ["wallet"] };
   const daemon = new MockDaemon({ profile, apps: [walletApp] });
 
   const before = await daemon.handle({ jsonrpc: "2.0", id: 1, method: "wallet.publicKey" }, walletApp.id);
-  const generated = await daemon.handle({ jsonrpc: "2.0", id: 2, method: "wallet.generate" }, walletApp.id);
+  const noConfirmationHandler = await daemon.handle({ jsonrpc: "2.0", id: 2, method: "wallet.generate" }, walletApp.id);
+  assert.equal(noConfirmationHandler.error.code, -32002);
+  assert.equal(daemon.walletAddress, before.result.publicKey);
+
+  let confirmation;
+  daemon.confirm = async (request) => {
+    confirmation = request;
+    return false;
+  };
+  const declined = await daemon.handle({ jsonrpc: "2.0", id: 3, method: "wallet.generate" }, walletApp.id);
+  assert.equal(declined.error.code, -32002);
+  assert.equal(daemon.walletAddress, before.result.publicKey);
+  assert.equal(confirmation.appId, walletApp.id);
+  assert.equal(confirmation.summary.action, "replaceWalletIdentity");
+  assert.equal(confirmation.summary.publicKey, before.result.publicKey);
+
+  daemon.confirm = async () => true;
+  const generated = await daemon.handle({ jsonrpc: "2.0", id: 4, method: "wallet.generate" }, walletApp.id);
   assert.match(generated.result.publicKey, /^[1-9A-HJ-NP-Za-km-z]+$/);
   assert.notEqual(generated.result.publicKey, before.result.publicKey);
   assert.equal(generated.result.protected, false);
-  const after = await daemon.handle({ jsonrpc: "2.0", id: 3, method: "wallet.publicKey" }, walletApp.id);
+  const after = await daemon.handle({ jsonrpc: "2.0", id: 5, method: "wallet.publicKey" }, walletApp.id);
   assert.equal(after.result.publicKey, generated.result.publicKey);
 
   // Protect + lock, then generation must be refused until unlocked.
-  await daemon.handle({ jsonrpc: "2.0", id: 4, method: "wallet.setPassphrase", params: { passphrase: "correct horse battery staple" } }, walletApp.id);
-  await daemon.handle({ jsonrpc: "2.0", id: 5, method: "wallet.lock" }, walletApp.id);
-  const refused = await daemon.handle({ jsonrpc: "2.0", id: 6, method: "wallet.generate" }, walletApp.id);
+  await daemon.handle({ jsonrpc: "2.0", id: 6, method: "wallet.setPassphrase", params: { passphrase: "correct horse battery staple" } }, walletApp.id);
+  await daemon.handle({ jsonrpc: "2.0", id: 7, method: "wallet.lock" }, walletApp.id);
+  let prompts = 0;
+  daemon.confirm = async () => { prompts += 1; return true; };
+  const refused = await daemon.handle({ jsonrpc: "2.0", id: 8, method: "wallet.generate" }, walletApp.id);
   assert.equal(refused.error.code, -32002);
-  const held = await daemon.handle({ jsonrpc: "2.0", id: 7, method: "wallet.publicKey" }, walletApp.id);
+  assert.equal(prompts, 0);
+  const held = await daemon.handle({ jsonrpc: "2.0", id: 9, method: "wallet.publicKey" }, walletApp.id);
   assert.equal(held.result.publicKey, generated.result.publicKey);
 
-  await daemon.handle({ jsonrpc: "2.0", id: 8, method: "wallet.unlock", params: { passphrase: "correct horse battery staple" } }, walletApp.id);
-  const regenerated = await daemon.handle({ jsonrpc: "2.0", id: 9, method: "wallet.generate" }, walletApp.id);
+  await daemon.handle({ jsonrpc: "2.0", id: 10, method: "wallet.unlock", params: { passphrase: "correct horse battery staple" } }, walletApp.id);
+  const regenerated = await daemon.handle({ jsonrpc: "2.0", id: 11, method: "wallet.generate" }, walletApp.id);
   assert.notEqual(regenerated.result.publicKey, generated.result.publicKey);
   assert.equal(regenerated.result.protected, false);
+  assert.equal(prompts, 1);
 });
 
 test("NFC mock exposes the legacy wallet NDEF contract", async () => {
