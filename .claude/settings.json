@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./scripts/dev.sh:*)",
+      "Bash(bash scripts/dev.sh:*)",
+      "Bash(npm:*)",
+      "Bash(cargo:*)",
+      "Bash(node --test:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)"
+    ]
+  }
+}

@@ -169,3 +169,7 @@ Publishing an app to the store is also a pull request — see
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
+
+For AI-assisted engineering, start with [`SOLWEAR_MAP.md`](SOLWEAR_MAP.md) and
+the shared rules in [`AGENTS.md`](AGENTS.md); use [`scripts/dev.sh`](scripts/dev.sh)
+for the repository-wide doctor, setup, build, test, lint, emulator, and e2e flow.
