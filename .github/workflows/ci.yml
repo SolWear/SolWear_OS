@@ -155,6 +155,7 @@ jobs:
             awk '
               $0 == "sdk/runtime" { print "10\t" $0; next }
               $0 == "sdk/cli"     { print "20\t" $0; next }
+              $0 == "os/shell"    { print "25\t" $0; next }
                                       { print "30\t" $0 }
             ' components.txt | sort -k1,1n -k2,2 | cut -f2- > components.ordered.txt
             mv components.ordered.txt components.txt

@@ -94,3 +94,26 @@ test("bridge interoperates with the device shell's solwear/kind wire format", as
     else globalThis.window = previousWindow;
   }
 });
+
+test("bridge ignores unmarked and contradictory parent messages", async () => {
+  const listeners = new Map();
+  const parent = { postMessage: () => {} };
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    parent,
+    innerWidth: 240,
+    innerHeight: 240,
+    addEventListener: (name, listener) => listeners.set(name, listener),
+  };
+  try {
+    const bridge = new Bridge("test");
+    const send = (data) => listeners.get("message")({ source: parent, data });
+    send({ kind: "init", appId: "bad.unmarked", capabilities: [], screen: { width: 1, height: 1, shape: "square" } });
+    send({ protocol: "other/1", solwear: 1, kind: "init", appId: "bad.conflict", capabilities: [], screen: { width: 2, height: 2, shape: "square" } });
+    send({ protocol: "solwear.bridge/1", solwear: 1, kind: "init", appId: "tech.solwear.good", capabilities: [], screen: { width: 240, height: 240, shape: "round" } });
+    assert.equal((await bridge.ready()).appId, "tech.solwear.good");
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});

@@ -23,6 +23,7 @@ import type { SolwearEvents } from "./types.js";
 
 /** How long to wait for the shell's `init` before declaring the app detached. */
 const HANDSHAKE_TIMEOUT_MS = 3000;
+const RPC_TIMEOUT_MS = 15000;
 
 export interface BridgeContext {
   appId: string;
@@ -44,7 +45,12 @@ export class Bridge {
   readonly events = new TypedEmitter<SolwearEvents>();
 
   private nextId = 1;
-  private pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; method: string }>();
+  private pending = new Map<number, {
+    resolve: (value: unknown) => void;
+    reject: (error: Error) => void;
+    method: string;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
   private context: BridgeContext | null = null;
   private readyPromise: Promise<BridgeContext>;
   private resolveReady!: (context: BridgeContext) => void;
@@ -105,7 +111,15 @@ export class Bridge {
 
     const id = this.nextId++;
     return await new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, method });
+      const timer = setTimeout(() => {
+        if (!this.pending.delete(id)) return;
+        reject(
+          new SolwearBridgeError(
+            `${method} timed out after ${RPC_TIMEOUT_MS / 1000} seconds; the SolWear shell may have disconnected.`,
+          ),
+        );
+      }, RPC_TIMEOUT_MS);
+      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, method, timer });
       this.send({ protocol: BRIDGE_PROTOCOL, type: "rpc", solwear: BRIDGE_VERSION, kind: "rpc", id, method, params });
     });
   }
@@ -143,7 +157,10 @@ export class Bridge {
   private onMessage = (event: MessageEvent): void => {
     const data = event.data as ShellToAppMessage | undefined;
     if (!data || typeof data !== "object") return;
-    if (data.protocol !== BRIDGE_PROTOCOL && (data as { solwear?: number }).solwear !== BRIDGE_VERSION) return;
+    const legacyVersion = (data as { solwear?: number }).solwear;
+    if (data.protocol === undefined && legacyVersion === undefined) return;
+    if (data.protocol !== undefined && data.protocol !== BRIDGE_PROTOCOL) return;
+    if (legacyVersion !== undefined && legacyVersion !== BRIDGE_VERSION) return;
     if (this.target && event.source !== this.target) return;
 
     const kind = data.type ?? (data as { kind?: string }).kind;
@@ -182,6 +199,7 @@ export class Bridge {
     const entry = this.pending.get(message.id);
     if (!entry) return;
     this.pending.delete(message.id);
+    clearTimeout(entry.timer);
     if (message.error || message.kind === "error") {
       const error = message.error ?? { code: -32603, message: "shell returned an unspecified error" };
       entry.reject(

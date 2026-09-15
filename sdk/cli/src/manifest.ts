@@ -32,6 +32,16 @@ export interface Manifest {
 const ID_PATTERN = /^[a-z][a-z0-9]*(\.[a-z0-9][a-z0-9-]*)+$/;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 
+function isSafeRelativePath(path: string): boolean {
+  return (
+    path.trim() !== "" &&
+    !path.startsWith("/") &&
+    !path.startsWith("\\") &&
+    !path.includes(":") &&
+    !path.split(/[\\/]/).some((segment) => segment === "." || segment === "..")
+  );
+}
+
 export function parseManifest(text: string, source: string): Manifest {
   let value: unknown;
   try {
@@ -80,7 +90,7 @@ export function validateManifest(value: unknown, source: string): Manifest {
   }
 
   const entry = typeof raw["entry"] === "string" && raw["entry"] ? (raw["entry"] as string) : "index.html";
-  if (entry.startsWith("/") || entry.includes("..")) {
+  if (!isSafeRelativePath(entry)) {
     problems.push(`"entry" must be a relative path inside the package (got "${entry}")`);
   }
 
@@ -103,7 +113,7 @@ export function validateManifest(value: unknown, source: string): Manifest {
   }
 
   const icon = typeof raw["icon"] === "string" ? (raw["icon"] as string) : undefined;
-  if (icon && (icon.startsWith("/") || icon.includes(".."))) {
+  if (icon && !isSafeRelativePath(icon)) {
     problems.push(`"icon" must be a relative path inside the package (got "${icon}")`);
   }
 

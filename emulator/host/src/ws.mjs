@@ -178,12 +178,34 @@ export class WebSocketConnection extends EventEmitter {
  * Attach a WebSocket handler to an existing HTTP server.
  * @param {import("node:http").Server} server
  * @param {(connection: WebSocketConnection) => void} onConnection
+ * @param {(url: URL) => string|null} [validateRequest]
  */
-export function attachWebSocket(server, onConnection) {
+export function attachWebSocket(server, onConnection, validateRequest) {
   server.on("upgrade", (request, socket) => {
     const key = request.headers["sec-websocket-key"];
-    if (request.headers.upgrade?.toLowerCase() !== "websocket" || !key) {
+    if (
+      request.headers.upgrade?.toLowerCase() !== "websocket" ||
+      request.headers["sec-websocket-version"] !== "13" ||
+      typeof key !== "string"
+    ) {
       socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+      return;
+    }
+
+    let url;
+    try {
+      url = new URL(request.url ?? "/", "http://127.0.0.1");
+    } catch {
+      socket.end("HTTP/1.1 400 Bad Request\r\n\r\nMalformed WebSocket URL\n");
+      return;
+    }
+    const rejection = validateRequest?.(url);
+    if (rejection) {
+      socket.end(
+        "HTTP/1.1 400 Bad Request\r\n" +
+          "Content-Type: text/plain; charset=utf-8\r\n" +
+          `Content-Length: ${Buffer.byteLength(rejection) + 1}\r\n\r\n${rejection}\n`,
+      );
       return;
     }
 
@@ -196,7 +218,6 @@ export function attachWebSocket(server, onConnection) {
     );
     socket.setNoDelay(true);
 
-    const url = new URL(request.url ?? "/", "http://127.0.0.1");
     onConnection(new WebSocketConnection(socket, url));
   });
 }

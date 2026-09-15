@@ -2,7 +2,7 @@
 <html lang="en">
   <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SolWear Emulator</title><link rel="stylesheet" href="/emulator/emulator.css"></head>
   <body>
-    <header><strong>SolWear Emulator</strong><label>Device <select id="profile"></select></label><span id="status">starting…</span></header>
+    <header><strong>SolWear Emulator</strong><label>Device <select id="profile"></select></label><span id="status" aria-live="polite">starting…</span></header>
     <main>
       <section class="preview"><div id="device"><iframe id="shell" src="/shell/" title="SolWear device"></iframe></div></section>
       <aside id="devtools">
@@ -22,8 +22,11 @@
             <label>Steps<input id="steps-control" type="number" min="0"></label>
             <label>Heart rate<input id="heart-control" type="number" min="20" max="240"></label>
             <label>Temperature<input id="temp-control" type="number" min="-20" max="100" step="0.1"></label>
+            <label>Ambient light<input id="light-control" type="number" min="0" max="200000"></label>
           </div>
           <button id="inject-notification" type="button">Inject notification</button>
+          <button id="reset-hal" type="button">Reset HAL</button>
+          <p id="control-error" role="alert" hidden></p>
         </fieldset>
         <div class="inspect"><span id="dev-summary"></span><code id="wallet"></code><code id="nfc-status"></code></div>
         <div class="log-title"><strong>RPC activity</strong><button id="pause-log" type="button">Pause</button></div>

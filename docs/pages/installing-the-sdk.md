@@ -78,15 +78,15 @@ solwear.system.screen;                       // { width, height, shape }, synchr
 
 solwear.power.status();                      // percent, charging, estimateMinutes
 
-solwear.display.setBrightness({ percent: 60 });
+solwear.display.setBrightness(60);
 
-solwear.sensors.read({ sensor: "heartRate" });
+solwear.sensors.read("heartRate");
 
 solwear.notifications.list();
 solwear.notifications.post({ title, body, appId });
 
 solwear.wallet.publicKey();
-solwear.wallet.signTransaction({ appId, message });
+solwear.wallet.signTransaction(message);
 ```
 
 `solwear.system.screen` is a synchronous property rather than a call, because

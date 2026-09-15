@@ -12,7 +12,7 @@ import { basename } from "node:path";
 import type { ParsedArgs } from "../args.js";
 import { rejectUnknownFlags } from "../args.js";
 import { CliError, colour, fail, info, success } from "../log.js";
-import { validateManifest } from "../manifest.js";
+import { parseManifest } from "../manifest.js";
 import { sha256Hex, verifyEntries } from "../signing.js";
 import { readZip, ZipFormatError } from "../zip.js";
 import { formatBytes } from "./build.js";
@@ -37,7 +37,7 @@ export async function verifyCommand(args: ParsedArgs): Promise<void> {
 
   const manifestEntry = entries.find((entry) => entry.path === "manifest.json");
   if (!manifestEntry) throw new CliError(`${basename(path)} contains no manifest.json.`);
-  const manifest = validateManifest(JSON.parse(manifestEntry.data.toString("utf8")), "manifest.json");
+  const manifest = parseManifest(manifestEntry.data.toString("utf8"), "manifest.json");
 
   info("");
   info(`  ${colour.bold(manifest.name)} ${manifest.version}  (${manifest.id})`);

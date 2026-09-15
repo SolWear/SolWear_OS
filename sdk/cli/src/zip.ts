@@ -19,6 +19,8 @@ export interface ZipEntry {
 const LOCAL_HEADER = 0x04034b50;
 const CENTRAL_HEADER = 0x02014b50;
 const END_OF_CENTRAL_DIRECTORY = 0x06054b50;
+const MAX_ENTRIES = 4096;
+const MAX_TOTAL_UNCOMPRESSED = 64 * 1024 * 1024;
 
 /** 2020-01-01 00:00:00 in MS-DOS date/time form, so archives are reproducible. */
 const DOS_TIME = 0;
@@ -46,6 +48,7 @@ export function crc32(buffer: Buffer): number {
  */
 export function createZip(entries: ZipEntry[]): Buffer {
   const sorted = [...entries].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  validateEntryList(sorted);
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
@@ -117,10 +120,14 @@ export class ZipFormatError extends Error {}
 export function readZip(buffer: Buffer): ZipEntry[] {
   const eocd = findEndOfCentralDirectory(buffer);
   const count = buffer.readUInt16LE(eocd + 10);
+  if (count > MAX_ENTRIES) throw new ZipFormatError(`archive has ${count} entries, the limit is ${MAX_ENTRIES}`);
   let cursor = buffer.readUInt32LE(eocd + 16);
   const entries: ZipEntry[] = [];
+  const paths = new Set<string>();
+  let totalUncompressed = 0;
 
   for (let i = 0; i < count; i++) {
+    requireRange(buffer, cursor, 46, `central directory entry ${i}`);
     if (buffer.readUInt32LE(cursor) !== CENTRAL_HEADER) {
       throw new ZipFormatError(`corrupt central directory at entry ${i}`);
     }
@@ -131,24 +138,46 @@ export function readZip(buffer: Buffer): ZipEntry[] {
     const extraLength = buffer.readUInt16LE(cursor + 30);
     const commentLength = buffer.readUInt16LE(cursor + 32);
     const localOffset = buffer.readUInt32LE(cursor + 42);
+    requireRange(buffer, cursor + 46, nameLength + extraLength + commentLength, `central directory entry ${i}`);
     const path = buffer.toString("utf8", cursor + 46, cursor + 46 + nameLength);
 
+    validateEntryPath(path);
+    if (paths.has(path)) throw new ZipFormatError(`duplicate archive entry "${path}"`);
+    paths.add(path);
+    totalUncompressed += uncompressedSize;
+    if (totalUncompressed > MAX_TOTAL_UNCOMPRESSED) {
+      throw new ZipFormatError("archive expands beyond the 64 MiB package limit");
+    }
+
+    requireRange(buffer, localOffset, 30, `local header for "${path}"`);
     if (buffer.readUInt32LE(localOffset) !== LOCAL_HEADER) {
       throw new ZipFormatError(`corrupt local header for "${path}"`);
     }
     const localNameLength = buffer.readUInt16LE(localOffset + 26);
     const localExtraLength = buffer.readUInt16LE(localOffset + 28);
+    requireRange(buffer, localOffset + 30, localNameLength + localExtraLength, `local header for "${path}"`);
+    const localPath = buffer.toString("utf8", localOffset + 30, localOffset + 30 + localNameLength);
+    if (localPath !== path) throw new ZipFormatError(`local header name does not match "${path}"`);
     const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+    requireRange(buffer, dataStart, compressedSize, `data for "${path}"`);
     const raw = buffer.subarray(dataStart, dataStart + compressedSize);
 
     let data: Buffer;
     if (method === 0) data = Buffer.from(raw);
-    else if (method === 8) data = inflateRawSync(raw);
+    else if (method === 8) {
+      try {
+        data = inflateRawSync(raw, { maxOutputLength: MAX_TOTAL_UNCOMPRESSED });
+      } catch (error) {
+        throw new ZipFormatError(`cannot decompress "${path}": ${(error as Error).message}`);
+      }
+    }
     else throw new ZipFormatError(`"${path}" uses unsupported compression method ${method}`);
 
     if (data.length !== uncompressedSize) {
       throw new ZipFormatError(`"${path}" has a size that does not match its header`);
     }
+    const expectedCrc = buffer.readUInt32LE(cursor + 16);
+    if (crc32(data) !== expectedCrc) throw new ZipFormatError(`"${path}" has a CRC that does not match its contents`);
 
     // Directory entries carry no payload and are not part of a .swa.
     if (!path.endsWith("/")) entries.push({ path, data });
@@ -159,10 +188,45 @@ export function readZip(buffer: Buffer): ZipEntry[] {
 }
 
 function findEndOfCentralDirectory(buffer: Buffer): number {
+  if (buffer.length < 22) {
+    throw new ZipFormatError("this file is not a ZIP archive: no end-of-central-directory record");
+  }
   // The record is 22 bytes plus a comment of up to 64KB, so scan backwards.
   const earliest = Math.max(0, buffer.length - 22 - 0xffff);
   for (let i = buffer.length - 22; i >= earliest; i--) {
     if (buffer.readUInt32LE(i) === END_OF_CENTRAL_DIRECTORY) return i;
   }
   throw new ZipFormatError("this file is not a ZIP archive: no end-of-central-directory record");
+}
+
+function requireRange(buffer: Buffer, offset: number, length: number, label: string): void {
+  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset + length > buffer.length) {
+    throw new ZipFormatError(`truncated ${label}`);
+  }
+}
+
+function validateEntryPath(path: string): void {
+  if (
+    path.length === 0 ||
+    path.includes("\0") ||
+    path.startsWith("/") ||
+    path.startsWith("\\") ||
+    path.includes(":") ||
+    path.split(/[\\/]/).some((segment) => segment === "." || segment === "..")
+  ) {
+    throw new ZipFormatError(`unsafe path in archive: "${path}"`);
+  }
+}
+
+function validateEntryList(entries: ZipEntry[]): void {
+  if (entries.length > MAX_ENTRIES) throw new ZipFormatError(`archive has ${entries.length} entries, the limit is ${MAX_ENTRIES}`);
+  const paths = new Set<string>();
+  let total = 0;
+  for (const entry of entries) {
+    validateEntryPath(entry.path);
+    if (paths.has(entry.path)) throw new ZipFormatError(`duplicate archive entry "${entry.path}"`);
+    paths.add(entry.path);
+    total += entry.data.length;
+    if (total > MAX_TOTAL_UNCOMPRESSED) throw new ZipFormatError("archive expands beyond the 64 MiB package limit");
+  }
 }

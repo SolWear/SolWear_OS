@@ -24,9 +24,15 @@ for (const profile of state.profiles) {
 apply(state.profile);
 
 select.addEventListener("change", async () => {
-  const next = await fetch(`/emulator/profile?id=${encodeURIComponent(select.value)}`).then((response) => response.json());
-  apply(next.profile);
-  shell.contentWindow.location.reload();
+  try {
+    const response = await fetch(`/emulator/profile?id=${encodeURIComponent(select.value)}`);
+    if (!response.ok) throw new Error(await response.text());
+    const next = await response.json();
+    apply(next.profile);
+    shell.contentWindow.location.reload();
+  } catch (error) {
+    showControlError(error);
+  }
 });
 shell.addEventListener("load", () => shell.contentWindow.focus());
 new EventSource("/emulator/reload").addEventListener("message", () => shell.contentWindow.location.reload());
@@ -38,8 +44,20 @@ function duration(ms) {
 }
 
 async function control(name, value) {
-  await fetch(`/emulator/control?name=${encodeURIComponent(name)}&value=${encodeURIComponent(value)}`);
-  await refreshDeveloperTools();
+  try {
+    const response = await fetch(`/emulator/control?name=${encodeURIComponent(name)}&value=${encodeURIComponent(value)}`);
+    if (!response.ok) throw new Error((await response.text()).trim());
+    byId("control-error").hidden = true;
+    await refreshDeveloperTools();
+  } catch (error) {
+    showControlError(error);
+  }
+}
+
+function showControlError(error) {
+  const view = byId("control-error");
+  view.textContent = error instanceof Error ? error.message : String(error);
+  view.hidden = false;
 }
 
 function bindRange(id, name) {
@@ -54,7 +72,9 @@ byId("nfc-control").addEventListener("change", (event) => void control("nfc", ev
 byId("steps-control").addEventListener("change", (event) => void control("steps", event.currentTarget.value));
 byId("heart-control").addEventListener("change", (event) => void control("heartRate", event.currentTarget.value));
 byId("temp-control").addEventListener("change", (event) => void control("temperature", event.currentTarget.value));
+byId("light-control").addEventListener("change", (event) => void control("ambientLight", event.currentTarget.value));
 byId("inject-notification").addEventListener("click", () => void control("notification", "Developer ping"));
+byId("reset-hal").addEventListener("click", () => void control("reset", "true"));
 byId("pause-log").addEventListener("click", (event) => {
   devPaused = !devPaused;
   event.currentTarget.textContent = devPaused ? "Resume" : "Pause";
@@ -80,6 +100,7 @@ async function refreshDeveloperTools() {
       byId("steps-control").value = Math.round(dev.hal.sensors.steps.value);
       byId("heart-control").value = Math.round(dev.hal.sensors.heartRate.value);
       byId("temp-control").value = dev.hal.sensors.temperature.value;
+      byId("light-control").value = Math.round(dev.hal.sensors.ambientLight.value);
     }
     byId("dev-summary").textContent = `${dev.profile} · ${dev.apps} apps · ${dev.notifications} notifications`;
     byId("wallet").textContent = `wallet ${dev.wallet}`;

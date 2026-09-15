@@ -5,7 +5,7 @@ import { basename, join, relative } from "node:path";
 import type { ParsedArgs } from "../args.js";
 import { boolFlag, rejectUnknownFlags, stringFlag } from "../args.js";
 import { CliError, colour, info, step, success, warn } from "../log.js";
-import { packageFileName, validateManifest, type Manifest } from "../manifest.js";
+import { packageFileName, parseManifest, type Manifest } from "../manifest.js";
 import { findMonorepoRoot, findProject } from "../paths.js";
 import { sha256Hex, verifyEntries } from "../signing.js";
 import { readZip } from "../zip.js";
@@ -53,7 +53,7 @@ export async function publishCommand(args: ParsedArgs): Promise<void> {
 
   const manifestEntry = entries.find((entry) => entry.path === "manifest.json");
   if (!manifestEntry) throw new CliError(`${basename(packagePath)} contains no manifest.json.`);
-  const manifest = validateManifest(JSON.parse(manifestEntry.data.toString("utf8")), "manifest.json");
+  const manifest = parseManifest(manifestEntry.data.toString("utf8"), "manifest.json");
 
   // The registry only accepts signed packages, so refuse early and clearly.
   const verification = verifyEntries(entries);

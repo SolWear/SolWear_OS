@@ -269,7 +269,7 @@ is `-32602`. Note that 0 means the dimmest the panel supports, which on some
 panels is not fully off.
 
 ```ts
-await solwear.display.setBrightness({ percent: 60 });
+await solwear.display.setBrightness(60);
 ```
 
 ---
@@ -724,10 +724,7 @@ Handle that path. A user declining is a normal outcome, not an exception.
 
 ```ts
 try {
-  const { signature } = await solwear.wallet.signTransaction({
-    appId: "tech.solwear.signer",
-    message: base64Message,
-  });
+  const signature = await solwear.wallet.signTransaction(base64Message);
 } catch (err) {
   // The user declined, or the prompt timed out.
 }

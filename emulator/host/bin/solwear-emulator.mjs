@@ -12,7 +12,8 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EmulatorServer } from "../src/server.mjs";
-import { findBrowser, openWindow } from "../src/launch.mjs";
+import { openWindow } from "../src/launch.mjs";
+import { ensureDefaultApp } from "../src/bootstrap.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const hostDir = resolve(here, "..");
@@ -23,17 +24,26 @@ const started = Date.now();
 
 function parseArgs(argv) {
   const flags = {};
+  const valued = new Set(["app", "profile", "port", "rpc-port", "shell", "mock"]);
+  const boolean = new Set(["help", "list-profiles", "no-window", "no-build"]);
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
-    if (!token.startsWith("--")) continue;
+    if (token === "-h") { flags.help = true; continue; }
+    if (!token.startsWith("--")) throw new Error(`unexpected argument "${token}"`);
     const body = token.slice(2);
     const eq = body.indexOf("=");
+    const name = eq >= 0 ? body.slice(0, eq) : body;
+    if (!valued.has(name) && !boolean.has(name)) throw new Error(`unknown option --${name}`);
+    if (boolean.has(name) && eq >= 0) throw new Error(`--${name} does not take a value`);
     if (eq >= 0) {
-      flags[body.slice(0, eq)] = body.slice(eq + 1);
-    } else if (argv[i + 1] && !argv[i + 1].startsWith("--")) {
-      flags[body] = argv[++i];
+      const value = body.slice(eq + 1);
+      if (!value) throw new Error(`--${name} needs a value`);
+      flags[name] = value;
+    } else if (valued.has(name)) {
+      if (!argv[i + 1] || argv[i + 1].startsWith("-")) throw new Error(`--${name} needs a value`);
+      flags[name] = argv[++i];
     } else {
-      flags[body] = true;
+      flags[name] = true;
     }
   }
   return flags;
@@ -48,7 +58,15 @@ function die(message, hint) {
 function listProfiles() {
   return readdirSync(profilesDir)
     .filter((name) => name.endsWith(".json"))
-    .map((name) => JSON.parse(readFileSync(join(profilesDir, name), "utf8")));
+    .map((name) => readJson(join(profilesDir, name), "device profile"));
+}
+
+function readJson(path, label) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    die(`Cannot read ${label} ${path}: ${error.message}`);
+  }
 }
 
 function loadProfile(name) {
@@ -57,9 +75,13 @@ function loadProfile(name) {
     const available = listProfiles().map((profile) => profile.id);
     die(`"${name}" is not a device profile.`, `Pick one of: ${available.join(", ")}`);
   }
-  const profile = JSON.parse(readFileSync(path, "utf8"));
-  if (!profile.screen?.width || !profile.screen?.height) {
-    die(`${path} has no screen dimensions.`, "Every profile needs screen.width, screen.height and screen.shape.");
+  const profile = readJson(path, "device profile");
+  if (
+    !Number.isInteger(profile.screen?.width) || profile.screen.width <= 0 ||
+    !Number.isInteger(profile.screen?.height) || profile.screen.height <= 0 ||
+    !["round", "square", "rect"].includes(profile.screen?.shape)
+  ) {
+    die(`${path} has an invalid screen.`, "Every profile needs positive integer width/height and shape round, square or rect.");
   }
   return profile;
 }
@@ -80,7 +102,12 @@ function resolveShell(flags) {
   return { dir: join(hostDir, "web", "shell"), source: "emulator reference shell" };
 }
 
-const flags = parseArgs(process.argv.slice(2));
+let flags;
+try {
+  flags = parseArgs(process.argv.slice(2));
+} catch (error) {
+  die(error.message, "Run with --help to see every option.");
+}
 
 if (flags.help === true || flags.h === true) {
   process.stdout.write(
@@ -94,6 +121,7 @@ if (flags.help === true || flags.h === true) {
       "  --rpc-port <n>     JSON-RPC WebSocket port (default: 8730)",
       "  --shell <dir>      serve a specific shell build",
       "  --mock <file.json> scripted HAL values",
+      "  --no-build        do not build the default demo when it is missing",
       "  --no-window        start the server only and print the URL",
       "  --list-profiles    print the device profiles and exit",
       "",
@@ -116,6 +144,13 @@ const profile = loadProfile(flags.profile ?? "pi-round-480");
 // with no arguments still shows something real.
 const appDir = resolve(flags.app ?? join(monorepo, "apps", "watchface", "dist"));
 const manifestPath = join(appDir, "manifest.json");
+if (!flags.app) {
+  try {
+    ensureDefaultApp(monorepo, appDir, { noBuild: flags["no-build"] === true });
+  } catch (error) {
+    die(error.message, "Check your network connection and rerun npm start, or build apps/watchface manually.");
+  }
+}
 if (!existsSync(manifestPath)) {
   die(
     `No built app at ${appDir}.`,
@@ -124,7 +159,10 @@ if (!existsSync(manifestPath)) {
       : "Run `solwear build` in the app directory first.",
   );
 }
-const appManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+const appManifest = readJson(manifestPath, "app manifest");
+if (!appManifest.id || !appManifest.name || !appManifest.version || !Array.isArray(appManifest.capabilities)) {
+  die(`${manifestPath} is not a usable SolWear manifest.`, "Run `solwear build` in the app directory to validate it.");
+}
 appManifest.url = `/apps/${appManifest.id}/${appManifest.entry ?? "index.html"}`;
 
 // Other installed apps come from the monorepo's apps/ directory, so the
@@ -145,15 +183,27 @@ if (existsSync(appsRoot)) {
         systemApps.push(manifest);
         appRoots[manifest.id] = existsSync(join(builtDir, manifest.entry ?? "index.html")) ? builtDir : projectDir;
       }
-    } catch {
+    } catch (error) {
       // A manifest that does not parse is the app author's problem, and it
       // must not stop the emulator from starting.
+      process.stderr.write(`! ignoring ${candidate}: ${error.message}\n`);
     }
   }
 }
 
 const shell = resolveShell(flags);
-const mock = flags.mock ? JSON.parse(readFileSync(resolve(flags.mock), "utf8")) : undefined;
+const mock = flags.mock ? readJson(resolve(flags.mock), "mock HAL file") : undefined;
+
+function port(name, fallback) {
+  const value = Number(flags[name] ?? fallback);
+  if (!Number.isInteger(value) || value < 0 || value > 65535) {
+    die(`--${name} must be an integer from 0 to 65535 (got ${JSON.stringify(flags[name])}).`);
+  }
+  return value;
+}
+const httpPort = port("port", 8731);
+const rpcPort = port("rpc-port", 8730);
+if (httpPort !== 0 && httpPort === rpcPort) die("--port and --rpc-port must be different.");
 
 const server = new EmulatorServer({
   profile,
@@ -166,8 +216,8 @@ const server = new EmulatorServer({
   appManifest,
   systemApps,
   appRoots,
-  httpPort: Number(flags.port ?? 8731),
-  rpcPort: Number(flags["rpc-port"] ?? 8730),
+  httpPort,
+  rpcPort,
   mock,
 });
 
@@ -195,7 +245,11 @@ process.stdout.write(
 if (flags["no-window"]) {
   process.stdout.write(`  Open ${server.url} in a browser. Press Ctrl+C to stop.\n\n`);
 } else {
-  const { mode } = openWindow(server.url, { width: bezel.width + 400, height: Math.max(bezel.height, 760) });
+  const { mode } = openWindow(server.url, {
+    width: bezel.width + 400,
+    height: Math.max(bezel.height, 760),
+    onError: (error) => process.stderr.write(`\n  ! Could not open the emulator window: ${error.message}\n    Open ${server.url} manually.\n\n`),
+  });
   if (mode === "fallback") {
     process.stdout.write(
       "  ! No Chromium-based browser found, so the emulator opened your default browser instead.\n" +

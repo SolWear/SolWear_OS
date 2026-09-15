@@ -39,6 +39,15 @@ test("packaging is deterministic, so the same input hashes the same", () => {
   assert.equal(sha256Hex(a), sha256Hex(b), "entry order must not change the archive");
 });
 
+test("ZIP handling rejects duplicate, unsafe and oversized entries", () => {
+  assert.throws(
+    () => createZip([{ path: "same.txt", data: Buffer.from("one") }, { path: "same.txt", data: Buffer.from("two") }]),
+    /duplicate archive entry/,
+  );
+  assert.throws(() => createZip([{ path: "../escape", data: Buffer.alloc(0) }]), /unsafe path/);
+  assert.throws(() => createZip([{ path: "huge.bin", data: Buffer.alloc(64 * 1024 * 1024 + 1) }]), /64 MiB/);
+});
+
 test("a signed package verifies", () => {
   const keypair = generateKeypair();
   const files = entries();
@@ -214,6 +223,26 @@ test("signing without a key explains how to make one", () => {
     assert.fail("should have exited non-zero");
   } catch (error) {
     assert.match(error.stderr, /solwear keygen/);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("verify reports a malformed archived manifest as a developer error", () => {
+  const workspace = mkdtempSync(join(tmpdir(), "solwear-cli-"));
+  try {
+    const archive = createZip([
+      { path: "manifest.json", data: Buffer.from("{") },
+      { path: "index.html", data: Buffer.from("ok") },
+    ]);
+    const packagePath = join(workspace, "malformed.swa");
+    writeFileSync(packagePath, archive);
+    execFileSync(process.execPath, [bin, "verify", packagePath], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    assert.fail("should have exited non-zero");
+  } catch (error) {
+    assert.equal(error.status, 1);
+    assert.match(error.stderr, /manifest\.json is not valid JSON/);
+    assert.doesNotMatch(error.stderr, /unexpected error/);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

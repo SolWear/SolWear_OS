@@ -71,31 +71,58 @@ export class MockHal {
   }
 
   setBrightness(percent) {
+    if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+      throw new TypeError("brightness must be a number between 0 and 100");
+    }
     this.brightness = Math.max(0, Math.min(100, Math.round(percent)));
     return {};
   }
 
   /** Mutable controls used only by the developer cockpit. */
   control(name, value) {
+    const number = (label, minimum, maximum) => {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
+        throw new Error(`${label} must be a number between ${minimum} and ${maximum}`);
+      }
+      return parsed;
+    };
     switch (name) {
       case "battery":
-        this.script.batteryPercent = Math.max(0, Math.min(100, Number(value)));
+        this.script.batteryPercent = number("battery", 0, 100);
         this.startedAt = Date.now();
         break;
       case "charging":
+        if (![true, false, "true", "false", "1", "0"].includes(value)) {
+          throw new Error('charging must be "true" or "false"');
+        }
         this.script.charging = value === true || value === "true" || value === "1";
         this.startedAt = Date.now();
         break;
       case "brightness":
-        this.setBrightness(Number(value));
+        this.setBrightness(number("brightness", 0, 100));
         break;
-      case "steps":
-      case "heartRate":
-      case "temperature":
-      case "ambientLight":
-        this.script.sensors = { ...(this.script.sensors ?? {}), [name]: Number(value) };
-        if (name === "steps") this.script.steps = Number(value);
+      case "steps": {
+        const parsed = number("steps", 0, 10_000_000);
+        this.script.sensors = { ...(this.script.sensors ?? {}), steps: parsed };
+        this.script.steps = parsed;
         break;
+      }
+      case "heartRate": {
+        const parsed = number("heart rate", 20, 240);
+        this.script.sensors = { ...(this.script.sensors ?? {}), heartRate: parsed };
+        break;
+      }
+      case "temperature": {
+        const parsed = number("temperature", -20, 100);
+        this.script.sensors = { ...(this.script.sensors ?? {}), temperature: parsed };
+        break;
+      }
+      case "ambientLight": {
+        const parsed = number("ambient light", 0, 200_000);
+        this.script.sensors = { ...(this.script.sensors ?? {}), ambientLight: parsed };
+        break;
+      }
       default:
         throw new Error(`unknown HAL control "${name}"`);
     }

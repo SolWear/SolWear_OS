@@ -75,22 +75,28 @@ export class EmulatorServer {
     this.rpcCount = 0;
     this.rpcErrors = 0;
     this.devLog = [];
+    this.appWatcher = null;
 
     this.http = createServer((request, response) => this.onRequest(request, response));
     this.rpc = createServer((_request, response) => {
       response.writeHead(426, { "content-type": "text/plain" });
       response.end("This port speaks JSON-RPC over WebSocket. Connect with ws://127.0.0.1:8730/?app=<id>\n");
     });
-    attachWebSocket(this.rpc, (connection) => this.onConnection(connection));
+    attachWebSocket(this.rpc, (connection) => this.onConnection(connection), (url) => {
+      const appId = url.searchParams.get("appId") ?? url.searchParams.get("app");
+      return appId === "" || appId === "system" ? "an app-bound connection needs a non-reserved app id" : null;
+    });
   }
 
   async listen() {
-    const [httpPort, rpcPort] = await Promise.all([
-      once(this.http, this.options.httpPort, "HTTP server", "--port"),
-      once(this.rpc, this.options.rpcPort, "JSON-RPC server", "--rpc-port"),
-    ]);
-    this.options.httpPort = httpPort;
-    this.options.rpcPort = rpcPort;
+    try {
+      this.options.httpPort = await once(this.http, this.options.httpPort, "HTTP server", "--port");
+      this.options.rpcPort = await once(this.rpc, this.options.rpcPort, "JSON-RPC server", "--rpc-port");
+    } catch (error) {
+      this.http.close();
+      this.rpc.close();
+      throw error;
+    }
   }
 
   get url() {
@@ -99,6 +105,11 @@ export class EmulatorServer {
 
   close() {
     for (const socket of this.sockets) socket.close(1001, "emulator stopping");
+    for (const response of this.reloadClients) response.end();
+    for (const resolveConfirmation of this.confirmations.values()) resolveConfirmation(false);
+    this.confirmations.clear();
+    this.appWatcher?.close();
+    this.appWatcher = null;
     this.http.close();
     this.rpc.close();
   }
@@ -153,7 +164,9 @@ export class EmulatorServer {
 
   broadcast(method, params) {
     for (const socket of this.sockets) {
-      socket.sendJson({ jsonrpc: "2.0", method, params });
+      if (!socket.url.searchParams.get("app") && !socket.url.searchParams.get("appId")) {
+        socket.sendJson({ jsonrpc: "2.0", method, params });
+      }
     }
   }
 
@@ -195,7 +208,12 @@ export class EmulatorServer {
 
   onRequest(request, response) {
     const url = new URL(request.url ?? "/", this.url);
-    const path = decodeURIComponent(url.pathname);
+    let path;
+    try {
+      path = decodeURIComponent(url.pathname);
+    } catch {
+      return this.sendText(response, 400, "Malformed URL encoding.");
+    }
 
     // The real shell asks the server it was loaded from where the JSON-RPC
     // socket is, exactly as it does on a device. Answering here is what lets
@@ -302,6 +320,12 @@ export class EmulatorServer {
         this.daemon.nfcEnabled = value === "true" || value === "1";
         this.daemon.broadcast?.("nfc.statusChanged", { enabled: this.daemon.nfcEnabled });
         this.record({ at: Date.now(), caller: "developer", method: "nfc.setEnabled", ok: true, durationMs: 0 });
+      } else if (name === "reset") {
+        this.daemon.hal = new MockHal(this.profile, this.options.mock);
+        this.daemon.nfcEnabled = false;
+        this.daemon.broadcast?.("display.brightnessChanged", { percent: this.daemon.hal.brightness });
+        this.daemon.broadcast?.("nfc.statusChanged", { enabled: false });
+        this.record({ at: Date.now(), caller: "developer", method: "hal.reset", ok: true, durationMs: 0 });
       } else if (name) {
         this.daemon.hal.control(name, value);
         if (name === "brightness") this.daemon.broadcast?.("display.brightnessChanged", { percent: this.daemon.hal.brightness });
@@ -362,9 +386,9 @@ export class EmulatorServer {
       timer = setTimeout(() => this.notifyReload("app rebuilt"), 120);
     };
     try {
-      watch(this.options.appDir, { recursive: true }, trigger);
+      this.appWatcher = watch(this.options.appDir, { recursive: true }, trigger);
     } catch {
-      watch(this.options.appDir, trigger);
+      this.appWatcher = watch(this.options.appDir, trigger);
     }
   }
 

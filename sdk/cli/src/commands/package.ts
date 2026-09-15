@@ -5,7 +5,7 @@ import { join, relative, sep } from "node:path";
 import type { ParsedArgs } from "../args.js";
 import { boolFlag, rejectUnknownFlags, stringFlag } from "../args.js";
 import { CliError, colour, info, step, success } from "../log.js";
-import { packageFileName, validateManifest, type Manifest } from "../manifest.js";
+import { packageFileName, parseManifest, type Manifest } from "../manifest.js";
 import { findProject, type Project } from "../paths.js";
 import { createZip, type ZipEntry } from "../zip.js";
 import { sha256Hex } from "../signing.js";
@@ -53,7 +53,7 @@ export function validatePackageEntries(entries: ZipEntry[]): Manifest {
       hint: "Run `solwear build` first; it copies manifest.json into dist/.",
     });
   }
-  const manifest = validateManifest(JSON.parse(manifestEntry.data.toString("utf8")), "manifest.json");
+  const manifest = parseManifest(manifestEntry.data.toString("utf8"), "manifest.json");
 
   if (!entries.some((entry) => entry.path === manifest.entry)) {
     throw new CliError(`The package is missing its entry point "${manifest.entry}".`, {

@@ -43,6 +43,51 @@ export function base58(buffer) {
   return out || "1";
 }
 
+function decodeBase58(text) {
+  let value = 0n;
+  for (const character of text) {
+    const digit = B58.indexOf(character);
+    if (digit < 0) throw MockDaemon.rpcError(ERR_INVALID_PARAMS, '`message` is not valid base58');
+    value = value * 58n + BigInt(digit);
+  }
+  const bytes = [];
+  while (value > 0n) {
+    bytes.push(Number(value & 0xffn));
+    value >>= 8n;
+  }
+  bytes.reverse();
+  let zeroes = 0;
+  while (zeroes < text.length && text[zeroes] === "1") zeroes++;
+  return Buffer.concat([Buffer.alloc(zeroes), Buffer.from(bytes)]);
+}
+
+function decodeMessage(message, encoding) {
+  switch (encoding.toLowerCase()) {
+    case "base64": {
+      if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(message)) {
+        throw MockDaemon.rpcError(ERR_INVALID_PARAMS, '`message` is not valid base64');
+      }
+      return Buffer.from(message, "base64");
+    }
+    case "base58":
+      return decodeBase58(message);
+    case "hex":
+      if (message.length % 2 !== 0) throw MockDaemon.rpcError(ERR_INVALID_PARAMS, '`message` hex has an odd length');
+      if (!/^[0-9a-fA-F]*$/.test(message)) throw MockDaemon.rpcError(ERR_INVALID_PARAMS, '`message` is not hex');
+      return Buffer.from(message, "hex");
+    default:
+      throw MockDaemon.rpcError(ERR_INVALID_PARAMS, `unsupported encoding \`${encoding.toLowerCase()}\``);
+  }
+}
+
+function requiredString(params, field) {
+  const value = params[field];
+  if (typeof value !== "string" || value.length === 0) {
+    throw MockDaemon.rpcError(ERR_INVALID_PARAMS, `\`${field}\` must be a non-empty string`);
+  }
+  return value;
+}
+
 export class MockDaemon {
   /**
    * @param {object} options
@@ -106,14 +151,17 @@ export class MockDaemon {
     const isNotification = id === undefined;
     const params = request.params ?? {};
 
-    if (Array.isArray(params)) {
+    if (!params || typeof params !== "object" || Array.isArray(params)) {
       return isNotification
         ? null
-        : this.error(id, ERR_INVALID_PARAMS, "parameters must be an object, never a positional array");
+        : this.error(id, ERR_INVALID_REQUEST, "`params` must be an object; positional arrays are not supported");
     }
 
     const namespace = method.split(".")[0];
-    if (!this.capabilitiesFor(callerId).includes(namespace)) {
+    if (!method.includes(".")) {
+      return isNotification ? null : this.error(id, ERR_METHOD_NOT_FOUND, `no such method "${method}"`);
+    }
+    if (callerId !== "system" && !this.capabilitiesFor(callerId).includes(namespace)) {
       return isNotification
         ? null
         : this.error(
@@ -169,8 +217,11 @@ export class MockDaemon {
         return this.hal.power();
 
       case "display.setBrightness": {
-        if (typeof params.percent !== "number") {
-          throw MockDaemon.rpcError(ERR_INVALID_PARAMS, '"percent" must be a number');
+        if (typeof params.percent !== "number" || !Number.isFinite(params.percent)) {
+          throw MockDaemon.rpcError(ERR_INVALID_PARAMS, '`percent` must be a number');
+        }
+        if (params.percent < 0 || params.percent > 100) {
+          throw MockDaemon.rpcError(ERR_INVALID_PARAMS, '`percent` must be between 0 and 100');
         }
         const result = this.hal.setBrightness(params.percent);
         this.broadcast?.("display.brightnessChanged", { percent: this.hal.brightness });
@@ -212,13 +263,12 @@ export class MockDaemon {
         return { items: [...this.notifications].sort((a, b) => b.timestampMs - a.timestampMs) };
 
       case "notifications.post": {
-        if (typeof params.title !== "string" || typeof params.body !== "string") {
-          throw MockDaemon.rpcError(ERR_INVALID_PARAMS, '"title" and "body" must be strings');
-        }
+        const title = requiredString(params, "title");
+        const body = typeof params.body === "string" ? params.body : "";
         const notification = {
           id: randomUUID(),
-          title: params.title,
-          body: params.body,
+          title,
+          body,
           // The daemon stamps the real caller, so an app cannot post as another.
           appId: callerId === "system" ? (params.appId ?? "system") : callerId,
           timestampMs: Date.now(),
@@ -260,20 +310,29 @@ export class MockDaemon {
         );
 
       case "apps.uninstall": {
-        if (!this.apps.has(params.appId)) {
-          throw MockDaemon.rpcError(ERR_INVALID_PARAMS, `"${params.appId}" is not installed`);
+        const appId = requiredString(params, "appId");
+        if (!this.apps.has(appId)) {
+          throw MockDaemon.rpcError(ERR_INVALID_PARAMS, `app \`${appId}\` is not installed`);
         }
-        this.apps.delete(params.appId);
-        this.broadcast?.("apps.changed", { reason: "uninstalled", appId: params.appId });
+        this.apps.delete(appId);
+        this.broadcast?.("apps.changed", { reason: "uninstalled", appId });
         return {};
       }
 
       case "apps.launch": {
-        if (!this.apps.has(params.appId)) {
-          throw MockDaemon.rpcError(ERR_INVALID_PARAMS, `"${params.appId}" is not installed`);
+        const appId = requiredString(params, "appId");
+        if (!this.apps.has(appId)) {
+          throw MockDaemon.rpcError(ERR_INVALID_PARAMS, `app \`${appId}\` is not installed`);
         }
-        for (const listener of this.launchListeners) listener(params.appId);
-        this.broadcast?.("apps.launch", { appId: params.appId });
+        for (const listener of this.launchListeners) listener(appId);
+        const manifest = this.apps.get(appId);
+        this.broadcast?.("apps.launch", {
+          appId,
+          name: manifest.name,
+          type: manifest.type,
+          url: manifest.url ?? `/apps/${manifest.id}/${manifest.entry ?? "index.html"}`,
+          capabilities: manifest.capabilities ?? [],
+        });
         return {};
       }
 
@@ -300,26 +359,25 @@ export class MockDaemon {
 
       case "wallet.signTransaction": {
         if (this.walletLocked) throw MockDaemon.rpcError(ERR_USER_REJECTED, "wallet is locked");
-        if (typeof params.message !== "string") {
-          throw MockDaemon.rpcError(ERR_INVALID_PARAMS, '"message" must be a base64 string');
+        const requestedApp = requiredString(params, "appId");
+        if (callerId !== "system" && requestedApp !== callerId) {
+          throw MockDaemon.rpcError(ERR_INVALID_PARAMS, '`appId` does not match the calling application');
         }
-        const appId = callerId === "system" ? (params.appId ?? "system") : callerId;
+        const message = requiredString(params, "message");
+        const encoding = typeof params.encoding === "string" ? params.encoding : "base64";
+        const appId = requestedApp;
 
         // Never sign without an affirmative action from the wearer. The
         // emulator asks the shell to show the same prompt the device shows.
-        let bytes;
-        try {
-          bytes = Buffer.from(params.message, "base64");
-        } catch {
-          throw MockDaemon.rpcError(ERR_INVALID_PARAMS, '"message" must be valid base64');
-        }
+        const bytes = decodeMessage(message, encoding);
+        if (bytes.length === 0) throw MockDaemon.rpcError(ERR_INVALID_PARAMS, '`message` decoded to zero bytes');
         const approved = this.confirm
           ? await this.confirm({
               appId,
               summary: {
                 appId,
                 byteLength: bytes.length,
-                encoding: "base64",
+                encoding,
                 digest: createHash("sha256").update(bytes).digest("hex"),
                 publicKey: this.walletAddress,
                 label: params.label ?? null,
