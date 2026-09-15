@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "solwear",
+  "description": "Build, emulate, package, sign, verify, and publish SolWear TypeScript apps with the real SolWear CLI and SDK.",
+  "version": "0.1.0",
+  "author": {
+    "name": "SolWear"
+  }
+}
