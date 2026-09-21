@@ -32,7 +32,7 @@ A **Solana-native wearable platform** — hardware + OS + SDK + app ecosystem. I
 ## 3. Live infrastructure
 
 ### neku server — hosts solwear.tech
-- **Host:** `169.58.10.252`, user **`nekudev`** (SSH key `~/.ssh/id_ed25519`; in `docker` + `sudo` groups; sudo is password-gated — human runs sudo). `root` SSH is closed.
+- **Host:** `<NEKU_IP — see private ops notes>`, user **`nekudev`** (SSH key `~/.ssh/id_ed25519`; in `docker` + `sudo` groups; sudo is password-gated — human runs sudo). `root` SSH is closed.
 - **Site source (writable):** `/root/solwear_site` — git checkout of `SolWear/solwear`, branch `preview-redesign`. `website/` is the Next.js app.
 - **Container:** `website-solwear-site-1` (image `website-solwear-site`), `127.0.0.1:3002→3000`. Build: `cd /root/solwear_site/website && docker compose up -d --build` (Dockerfile pins Node 20; `env_file: .env`).
 - **DB:** SQLite `/data/solwear.db` in volume `emails_data` (tables incl. `notify_emails` = waitlist). SOLWEAR_DATA_DIR=/data.
@@ -44,14 +44,14 @@ A **Solana-native wearable platform** — hardware + OS + SDK + app ecosystem. I
 - **Env set on container:** X_API_KEY/SECRET, X_CLIENT_ID/SECRET (unused — X login is OAuth 1.0a), X_CALLBACK_URL, SESSION_SECRET, SOLWEAR_X_USER_ID, TURNSTILE_SITE/SECRET, PINBOARD_ADMIN_TOKEN. Outbound mailer is inert until `WAITLIST_EMAIL_ENABLED=1` + provider keys.
 
 ### Raspberry Pi — runs SolWear OS
-- **Reach:** Tailscale node `solwear` = `100.111.72.39` (also LAN `solwear.local`). SSH user `solwear`, key `~/.ssh/solwear_raspberry_ed25519` (passphrase-protected).
+- **Reach:** Tailscale node `solwear` = `<PI_TAILSCALE_IP — see private ops notes>` (also LAN `solwear.local`). SSH user `solwear`, key `~/.ssh/solwear_raspberry_ed25519` (passphrase-protected).
 - **Board:** Raspberry Pi 4B, Raspberry Pi OS **Desktop** (lightdm autologin, Xorg :0). Provisioned via the dev `install-on-pi.sh` path — only `solweard.service` is installed (no full kiosk image).
 - **Daemon:** `solweard` (`/usr/bin/solweard`), RPC WebSocket `127.0.0.1:8730/rpc`, static shell `127.0.0.1:8731`. Shell served from directory **`/usr/share/solwear/shell/`** (writable by `solwear` — deploy new shell by scp'ing `os/shell/dist/{index.html,shell.css,shell.js}` there).
 - **Kiosk:** Chromium kiosk → `:8731`, as systemd **user** unit `solwear-kiosk.service` (+ `~/.config/autostart/solwear-kiosk.desktop`). Start needs `XDG_RUNTIME_DIR=/run/user/1000` + `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus`.
 - **VNC:** `x11vnc` on `:5900` (password `/etc/x11vnc.pass`; credential stored in the user's Royal TSX). Wallet: `wallet.status` unlocked/unprotected — set a passphrase before production.
 
 ### Domains / Cloudflare
-- `solwear.tech` (A → 169.58.10.252, proxied), `www` + `docs` (CNAME → solwear.tech, proxied). TLS via Let's Encrypt `solwear.tech` cert (reused for docs under CF Full mode).
+- `solwear.tech` (A → <NEKU_IP — see private ops notes>, proxied), `www` + `docs` (CNAME → solwear.tech, proxied). TLS via Let's Encrypt `solwear.tech` cert (reused for docs under CF Full mode).
 - **Turnstile** widget `solwear` (site key `0x4AAAAAADTVk28Jjk6DLUC5`); hostnames `solwear.tech`, `www.solwear.tech`; Managed mode. Working (analytics show solved challenges).
 
 ### Access identities
