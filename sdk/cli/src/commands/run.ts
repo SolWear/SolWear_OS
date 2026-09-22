@@ -2,7 +2,8 @@
 
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import type { ParsedArgs } from "../args.js";
 import { boolFlag, closest, rejectUnknownFlags, stringFlag } from "../args.js";
 import { CliError, colour, info, step } from "../log.js";
@@ -11,19 +12,43 @@ import { buildProject } from "./build.js";
 
 export const RUN_FLAGS = ["qemu", "profile", "list-profiles", "port", "rpc-port", "no-build", "no-window", "shell", "image"];
 
-/** The emulator lives in the monorepo, not in the published CLI package. */
+/**
+ * Locate the emulator. Inside the monorepo it is `emulator/<kind>`. Outside it
+ * — a user who installed the CLI from npm — the host emulator ships as its own
+ * package, `@solwear/emulator-host`, pulled in as a dependency of this CLI. The
+ * QEMU path needs the monorepo (and a QEMU binary), so it stays monorepo-only.
+ */
 function emulatorDir(kind: "host" | "qemu"): string {
   const root = findMonorepoRoot();
-  if (!root) {
-    throw new CliError("The emulator is part of the SolWear monorepo and is not bundled with the CLI.", {
-      hint: "Clone the monorepo and run solwear from inside it, or point SOLWEAR_HOME at your checkout.",
+  if (root) {
+    const dir = join(root, "emulator", kind);
+    if (!existsSync(dir)) {
+      throw new CliError(`${dir} is missing from this checkout.`, { hint: "Try `git pull` in the monorepo." });
+    }
+    return dir;
+  }
+
+  if (kind === "host") {
+    const installed = resolveInstalledHostEmulator();
+    if (installed) return installed;
+    throw new CliError("The host emulator is not installed.", {
+      hint: "Reinstall the CLI (npm install --global @solwear/cli), which bundles @solwear/emulator-host.",
     });
   }
-  const dir = join(root, "emulator", kind);
-  if (!existsSync(dir)) {
-    throw new CliError(`${dir} is missing from this checkout.`, { hint: "Try `git pull` in the monorepo." });
+
+  throw new CliError("The QEMU emulator is only available inside the SolWear monorepo.", {
+    hint: "Clone the monorepo and run solwear from inside it, or use the host emulator (drop --qemu).",
+  });
+}
+
+/** The directory of the installed `@solwear/emulator-host` package, if present. */
+function resolveInstalledHostEmulator(): string | undefined {
+  try {
+    const require = createRequire(import.meta.url);
+    return dirname(require.resolve("@solwear/emulator-host/package.json"));
+  } catch {
+    return undefined;
   }
-  return dir;
 }
 
 function profilesDir(): string {

@@ -1,5 +1,6 @@
 /** Command dispatch for the `solwear` CLI. */
 
+import { createRequire } from "node:module";
 import { parseArgs, boolFlag, closest } from "./args.js";
 import { HELP, printHelp } from "./help.js";
 import { CliError, reportError } from "./log.js";
@@ -13,7 +14,15 @@ import { runCommand } from "./commands/run.js";
 import { keygenCommand, signCommand } from "./commands/sign.js";
 import { verifyCommand } from "./commands/verify.js";
 
-export const VERSION = "0.1.0";
+/** Read from package.json so the reported version can never drift from it. */
+export const VERSION: string = (() => {
+  try {
+    const require = createRequire(import.meta.url);
+    return (require("../package.json") as { version: string }).version;
+  } catch {
+    return "0.0.0";
+  }
+})();
 
 type Handler = (args: ReturnType<typeof parseArgs>) => Promise<void>;
 
