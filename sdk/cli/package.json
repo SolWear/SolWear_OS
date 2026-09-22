@@ -1,8 +1,11 @@
 {
   "name": "@solwear/cli",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "The solwear command line tool: create, build, run, package, sign and publish SolWear apps.",
   "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "solwear": "dist/bin.js"
@@ -19,9 +22,11 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build": "npm run clean && tsc -p tsconfig.json && chmod +x dist/bin.js",
-    "test": "npm run build && node --test test/*.test.mjs"
+    "test": "npm run build && node --test test/*.test.mjs",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
+    "@solwear/emulator-host": "^0.1.0",
     "esbuild": "^0.25.0"
   },
   "devDependencies": {

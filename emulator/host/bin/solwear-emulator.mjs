@@ -77,6 +77,10 @@ function resolveShell(flags) {
   }
   const built = join(monorepo, "os", "shell", "dist");
   if (existsSync(join(built, "index.html"))) return { dir: built, source: "os/shell/dist" };
+  // Published installs have no monorepo; prepublishOnly bundles the real shell
+  // build into ./shell (see scripts/bundle-shell.mjs).
+  const bundled = join(hostDir, "shell");
+  if (existsSync(join(bundled, "index.html"))) return { dir: bundled, source: "bundled shell" };
   return { dir: join(hostDir, "web", "shell"), source: "emulator reference shell" };
 }
 
