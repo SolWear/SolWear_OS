@@ -5,6 +5,15 @@
   "version": "0.1.0",
   "publisher": "solwear",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SolWear/SolWear_OS.git",
+    "directory": "sdk/vscode"
+  },
+  "homepage": "https://solwear.tech",
+  "bugs": {
+    "url": "https://github.com/SolWear/SolWear_OS/issues"
+  },
   "engines": {
     "vscode": "^1.96.0",
     "node": ">=22"
@@ -24,6 +33,7 @@
   "files": [
     "dist",
     "README.md",
+    "LICENSE",
     "package.json"
   ],
   "scripts": {
